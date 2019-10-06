@@ -4,6 +4,33 @@
 
   var weatherAPIUrlBase = 'https://publicdata-weather.firebaseio.com/';
 
+  var injectedForecast = {
+    key: 'newyork',
+    label: 'New York, NY',
+    currently: {
+      time: 1453489481,
+      summary: 'Clear',
+      icon: 'partly-cloudy-day',
+      temperature: 52.74,
+      apparentTemperature: 74.34,
+      precipProbability: 0.20,
+      humidity: 0.77,
+      windBearing: 125,
+      windSpeed: 1.52
+    },
+    daily: {
+      data: [
+        {icon: 'clear-day', temperatureMax: 55, temperatureMin: 34},
+        {icon: 'rain', temperatureMax: 55, temperatureMin: 34},
+        {icon: 'snow', temperatureMax: 55, temperatureMin: 34},
+        {icon: 'sleet', temperatureMax: 55, temperatureMin: 34},
+        {icon: 'fog', temperatureMax: 55, temperatureMin: 34},
+        {icon: 'wind', temperatureMax: 55, temperatureMin: 34},
+        {icon: 'partly-cloudy-day', temperatureMax: 55, temperatureMin: 34}
+      ]
+    }
+  };
+
   var app = {
     isLoading: true,
     visibleCards: {},
@@ -41,6 +68,7 @@
     var label = selected.textContent;
     app.getForecast(key, label);
     app.selectedCities.push({key: key, label: label});
+    app.saveSelectedCities()
     app.toggleAddDialog(false);
   });
 
@@ -77,6 +105,13 @@
       app.container.appendChild(card);
       app.visibleCards[data.key] = card;
     }
+
+    //verify data is newer that what we already have
+    var dateElem = card.querySelector('.date');
+    if(dateElem.getAttribute('data-dt') >= data.currently.time) {
+      return;
+    }
+    
     card.querySelector('.description').textContent = data.currently.summary;
     card.querySelector('.date').textContent =
       new Date(data.currently.time * 1000);
@@ -126,7 +161,24 @@
   // Gets a forecast for a specific city and update the card with the data
   app.getForecast = function(key, label) {
     var url = weatherAPIUrlBase + key + '.json';
+    if('caches' in window) {
+      caches.match(url)
+        .then(response => {
+          if(response) {
+            response.json()
+              .then(json => {
+                if(app.hasRequestPending) {
+                  json.key = key;
+                  json.label = label;
+                  app.updateForecasts(json)
+                }
+              });
+          }
+        });
+    }
+
     // Make the XHR to get the data, then update the card
+    app.hasRequestPending = true
     var request = new XMLHttpRequest();
     request.onreadystatechange = function() {
       if (request.readyState === XMLHttpRequest.DONE) {
@@ -134,6 +186,7 @@
           var response = JSON.parse(request.response);
           response.key = key;
           response.label = label;
+          app.hasRequestPending = false;
           app.updateForecastCard(response);
         }
       }
@@ -149,5 +202,40 @@
       app.getForecast(key);
     });
   };
+
+  app.saveSelectedCities = function() {
+    window.localforage.setItem('selectedCities', app.selectedCities);
+  }
+
+  document.addEventListener('DOMContentLoaded', function(city) {
+    window.localforage.getItem('selectedCities', function(err, cityList) {
+      if(cityList) {
+        app.selectedCities = cityList;
+        app.selectedCities.forEach(function(city) {
+          app.getForecast(city.key, city.label)
+        });
+      } else {
+        app.updateForecasts(injectedForecast);
+        app.selectedCities = [
+          { key: injectedForecast.key, label: injectedForecast.label }
+        ]
+      };
+
+      app.saveSelectedCities()
+    })
+  })
+
+  // app.updateForecastCard(injectedForecast);
+
+  if('serviceWorker' in navigator) {
+    navigator.serviceWorker
+      .register('/service-worker.js')
+      .then(
+        function(registration) {
+          console.log('Service Worker Registered', registration);
+        }
+      ); 
+  }
+  
 
 })();
